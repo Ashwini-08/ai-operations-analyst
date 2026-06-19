@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.database import check_database_connection
+from app.routes.analytics import router as analytics_router
 
 app = FastAPI(
     title="AI Operations Analyst API",
@@ -38,3 +39,6 @@ def database_health_check():
         "status": "error",
         "database": "not connected"
     }
+
+
+app.include_router(analytics_router)
