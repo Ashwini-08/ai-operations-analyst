@@ -4,6 +4,7 @@ from app.database import check_database_connection
 from app.routes.analytics import router as analytics_router
 from app.routes.investigations import router as investigations_router
 from app.routes.agent import router as agent_router
+from app.routes.rag import router as rag_router
 
 app = FastAPI(
     title="AI Operations Analyst API",
@@ -46,3 +47,4 @@ def database_health_check():
 app.include_router(analytics_router)
 app.include_router(investigations_router)
 app.include_router(agent_router)
+app.include_router(rag_router)
