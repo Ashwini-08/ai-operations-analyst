@@ -5,6 +5,7 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.services.investigation_service import investigate_churn
+from app.services.retrieval_service import retrieve_relevant_context
 
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -36,19 +37,26 @@ def extract_json(text: str) -> dict:
         return json.loads(match.group(0))
 
 
-def build_churn_prompt(question: str, investigation: dict) -> str:
+def build_churn_prompt(
+    question: str,
+    investigation: dict,
+    rag_context: list[dict],
+) -> str:
     return f"""
 You are an AI Operations Analyst.
 
 User question:
 {question}
 
-Use ONLY the following investigation data.
+Use ONLY the provided structured investigation data and internal knowledge context.
 Do not invent numbers.
-Do not mention data that is not provided.
+Do not mention unsupported facts.
 
-Investigation data:
+Structured investigation data:
 {json.dumps(investigation, indent=2)}
+
+Internal knowledge context:
+{json.dumps(rag_context, indent=2)}
 
 Return ONLY valid JSON with this exact structure:
 {{
@@ -59,14 +67,18 @@ Return ONLY valid JSON with this exact structure:
 }}
 
 Rules:
-- executive_summary must be concise and business-friendly.
-- key_findings must be grounded in the provided metrics.
-- recommended_actions must be specific and operational.
+- executive_summary must mention the churn rate, top region, leading cancellation reason, and revenue impact.
+- key_findings must be grounded in the structured investigation data.
+- recommended_actions must use the internal knowledge context when relevant.
 - priority_level must reflect churn rate and revenue impact.
 """
 
 
-def fallback_response(question: str, investigation: dict) -> dict:
+def fallback_response(
+    question: str,
+    investigation: dict,
+    rag_context: list[dict],
+) -> dict:
     metrics = investigation["metrics"]
 
     priority_level = "medium"
@@ -84,6 +96,7 @@ def fallback_response(question: str, investigation: dict) -> dict:
         "recommended_actions": investigation["recommendations"],
         "priority_level": priority_level,
         "source_metrics": metrics,
+        "retrieved_context": rag_context,
     }
 
 
@@ -91,7 +104,17 @@ def generate_churn_investigation_response(question: str, db: Session):
     investigation = investigate_churn(db)
     metrics = investigation["metrics"]
 
-    prompt = build_churn_prompt(question, investigation)
+    rag_context = retrieve_relevant_context(
+        query=question,
+        db=db,
+        top_k=3,
+    )
+
+    prompt = build_churn_prompt(
+        question=question,
+        investigation=investigation,
+        rag_context=rag_context,
+    )
 
     try:
         raw_output = call_ollama(prompt)
@@ -104,7 +127,12 @@ def generate_churn_investigation_response(question: str, db: Session):
             "recommended_actions": parsed_output["recommended_actions"],
             "priority_level": parsed_output["priority_level"],
             "source_metrics": metrics,
+            "retrieved_context": rag_context,
         }
 
     except Exception:
-        return fallback_response(question, investigation)
+        return fallback_response(
+            question=question,
+            investigation=investigation,
+            rag_context=rag_context,
+        )
